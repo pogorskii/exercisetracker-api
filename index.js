@@ -106,8 +106,7 @@ app
   .route("/api/users")
   .post(async (req, res) => {
     const newUserId = await createUser(req.body.username);
-    console.log(newUserId);
-    res.json({ useasdfdsfrname: req.body.username, _id: newUserId });
+    res.json({ username: req.body.username, _id: newUserId });
   })
   .get(async (req, res) => {
     const response = await User.find()
