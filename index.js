@@ -34,8 +34,8 @@ const userSchema = new Schema({
   count: { type: Number, default: 0 },
   log: [
     {
-      description: { type: String, required: true },
-      duration: { type: Number, required: true },
+      description: { type: String },
+      duration: { type: Number },
       date: { type: String },
       origDate: { type: Date },
     },
@@ -52,15 +52,9 @@ const createUser = async (username) => {
     .catch((err) => console.error("Failed to connect to MongoDB:", err));
 };
 
-// Get username by ID
-const getUsernameById = async (userId) => {
-  const response = await User.findById(userId);
-  return response.username;
-};
-
 ////// Exercise documents logic
 // Create Exercise Schema
-const exerciseSchema = new Schema({
+const logSchema = new Schema({
   description: { type: String },
   duration: { type: Number },
   date: { type: String },
@@ -69,11 +63,11 @@ const exerciseSchema = new Schema({
 });
 
 // Create Exercise Model
-const Exercise = mongoose.model("Exercise", exerciseSchema); // "Exercise" is a collection name
+const Log = mongoose.model("Log", logSchema); // "Exercise" is a collection name
 
 // Save Exercise document
-const createExercise = async (data) => {
-  return await Exercise.create({
+const createLog = async (data) => {
+  return await Log.create({
     description: data.username,
     duration: data.duration,
     date: data.dateString,
@@ -118,9 +112,7 @@ app
     res.json({ username: req.body.username, _id: newUserId });
   })
   .get(async (req, res) => {
-    const response = await User.find()
-      .then((res) => res)
-      .catch((err) => console.error("Failed to connect to MongoDB:", err));
+    const response = await User.find().select({ count: 0, log: 0, __v: 0 });
     res.json(response);
   });
 
@@ -134,29 +126,17 @@ app.route("/api/users/:_id/exercises").post(async (req, res) => {
     origDate: dateRaw,
     date: dateString,
   };
-
-  console.log(newExercise);
-  User.findByIdAndUpdate(uId, {
+  const user = await User.findByIdAndUpdate(uId, {
     $push: { log: newExercise },
     $inc: { count: 1 },
-  });
-
-  const exerciseData = {};
-  exerciseData.uId = req.body[":_id"];
-  exerciseData.description = req.body.description;
-  exerciseData.duration = req.body.duration;
-  exerciseData.username = await getUsernameById(exerciseData.uId);
-  exerciseData.date = req.body.date ? new Date(req.body.date) : new Date();
-  exerciseData.dateString = exerciseData.date.toDateString();
-
-  await createExercise(exerciseData);
+  }).then((res) => res.username);
 
   res.json({
-    username: exerciseData.username,
-    description: exerciseData.description,
-    duration: exerciseData.duration,
-    date: exerciseData.dateString,
-    _id: exerciseData.uId,
+    username: user,
+    _id: uId,
+    description: req.body.description,
+    duration: Number(req.body.duration),
+    date: dateString,
   });
 });
 
@@ -165,7 +145,9 @@ app.route("/api/users/:_id/logs").get(async (req, res) => {
   const to = req.query.to ? new Date(req.query.to) : undefined;
   const limit = req.query.limit;
   const uId = req.params._id;
-  const response = await getUserLogs(uId, from, to, limit);
+  const response = await User.find({
+    _id: uId,
+  });
   res.json(response);
 });
 
