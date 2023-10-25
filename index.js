@@ -1,154 +1,112 @@
-require("dotenv").config({ path: "./.env" });
+require("dotenv").config();
 const express = require("express");
-const bodyParser = require(`body-parser`);
 const cors = require("cors");
 const app = express();
-
-// Connect MongoDB
 const mongoose = require("mongoose");
-mongoose
-  .connect(
-    "mongodb+srv://staspogorskii:somepass@cluster0.tpz2rdo.mongodb.net/?retryWrites=true",
-    {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    }
-  )
-  .then(() => console.log("Connected to MongoDB"))
-  .catch((err) => console.error("Failed to connect to MongoDB:", err));
+const { Schema } = mongoose;
+
+mongoose.connect(process.env.MONGO_URI);
+
+const UserSchema = new Schema({
+  username: String,
+});
+const User = mongoose.model("User", UserSchema);
+
+const ExerciseSchema = new Schema({
+  user_id: { type: String, required: true },
+  description: String,
+  duration: Number,
+  date: Date,
+});
+const Exercise = mongoose.model("Exercise", ExerciseSchema);
 
 app.use(cors());
 app.use(express.static("public"));
+app.use(express.urlencoded({ extended: true }));
 app.get("/", (req, res) => {
   res.sendFile(__dirname + "/views/index.html");
 });
-app.use(bodyParser.urlencoded({ extended: false }));
 
-// Get Schema prototype
-const { Schema } = mongoose;
-
-////// User documents logic
-// Create User Schema
-const userSchema = new Schema({
-  username: { type: String, required: true },
-  count: { type: Number, default: 0 },
-  log: [
-    {
-      description: { type: String },
-      duration: { type: Number },
-      date: { type: String },
-      origDate: { type: Date },
-    },
-  ],
+app.get("/api/users", async (req, res) => {
+  const users = await User.find({}).select("_id username");
+  if (!users) {
+    res.send("No users");
+  } else {
+    res.json(users);
+  }
 });
 
-// Create User Model
-const User = mongoose.model("User", userSchema); // "User" is a collection name
-
-// Save User document
-const createUser = async (username) => {
-  return await User.create({ username: username })
-    .then((res) => res.id)
-    .catch((err) => console.error("Failed to connect to MongoDB:", err));
-};
-
-////// Exercise documents logic
-// Create Exercise Schema
-const logSchema = new Schema({
-  description: { type: String },
-  duration: { type: Number },
-  date: { type: String },
-  origDate: { type: Date },
-  uId: { type: String },
-});
-
-// Create Exercise Model
-const Log = mongoose.model("Log", logSchema); // "Exercise" is a collection name
-
-// Save Exercise document
-const createLog = async (data) => {
-  return await Log.create({
-    description: data.username,
-    duration: data.duration,
-    date: data.dateString,
-    origDate: data.date,
-    uId: data.uId,
-  })
-    .then((res) => res)
-    .catch((err) => console.error("Failed to connect to MongoDB:", err));
-};
-
-// Get User logs
-const getUserLogs = async (uId, from, to, limit) => {
-  const user = await User.findById(uId)
-    .then((res) => res.username)
-    .catch((err) => console.error("Failed to connect to MongoDB:", err));
-  const exercises = await Exercise.find({
-    uId: uId,
-    origDate: {
-      $gte: from || new Date("1950-01-01"),
-      $lte: to || new Date("2100-01-01"),
-    },
-  })
-    .limit(limit)
-    .select({
-      username: 0,
-      _id: 0,
-      uId: 0,
-      __v: 0,
-    });
-  return {
-    username: user,
-    count: exercises.length,
-    _id: uId,
-    log: exercises,
-  };
-};
-
-app
-  .route("/api/users")
-  .post(async (req, res) => {
-    const newUserId = await createUser(req.body.username);
-    res.json({ username: req.body.username, _id: newUserId });
-  })
-  .get(async (req, res) => {
-    const response = await User.find().select({ count: 0, log: 0, __v: 0 });
-    res.json(response);
+app.post("/api/users", async (req, res) => {
+  const userObj = new User({
+    username: req.body.username,
   });
 
-app.route("/api/users/:_id/exercises").post(async (req, res) => {
-  const uId = req.body[":_id"];
-  const dateRaw = req.body.date ? new Date(req.body.date) : new Date();
-  const dateString = dateRaw.toDateString();
-  const newExercise = {
-    description: req.body.description,
-    duration: req.body.duration,
-    origDate: dateRaw,
-    date: dateString,
-  };
-  const user = await User.findByIdAndUpdate(uId, {
-    $push: { log: newExercise },
-    $inc: { count: 1 },
-  }).then((res) => res.username);
+  try {
+    const user = await userObj.save();
+    res.json(user);
+  } catch (err) {
+    console.log(err);
+  }
+});
+
+app.post("/api/users/:_id/exercises", async (req, res) => {
+  const id = req.params._id;
+  const { description, duration, date } = req.body;
+
+  try {
+    const user = await User.findById(id);
+    if (!user) {
+      res.send("Could not find user");
+    } else {
+      const exerciseObj = new Exercise({
+        user_id: user._id,
+        description,
+        duration,
+        date: date ? new Date(date) : new Date(),
+      });
+      const exercise = await exerciseObj.save();
+      res.json({
+        _id: user._id,
+        username: user.username,
+        description: exercise.description,
+        duration: exercise.duration,
+        date: new Date(exercise.date).toDateString(),
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    res.send("There was an error saving the exercise");
+  }
+});
+
+app.get("/api/users/:_id/logs", async (req, res) => {
+  const from = req.query.from ? new Date(req.query.from) : new Date(0);
+  const to = req.query.to ? new Date(req.query.to) : new Date();
+  const limit = +req.query.limit || 500;
+  const uId = req.params._id;
+  const response = await User.findById(uId);
+  if (!response) res.send("Could not find user.");
+
+  const queryResult = await Exercise.find({
+    user_id: uId,
+    date: {
+      $gte: from,
+      $lte: to,
+    },
+  }).limit(limit);
+
+  const log = queryResult.map((entry) => ({
+    description: entry.description,
+    duration: entry.duration,
+    date: entry.date.toDateString(),
+  }));
 
   res.json({
-    username: user,
-    _id: uId,
-    description: req.body.description,
-    duration: Number(req.body.duration),
-    date: dateString,
+    username: response.username,
+    count: queryResult.length,
+    _id: response._id,
+    log,
   });
-});
-
-app.route("/api/users/:_id/logs").get(async (req, res) => {
-  const from = req.query.from ? new Date(req.query.from) : undefined;
-  const to = req.query.to ? new Date(req.query.to) : undefined;
-  const limit = req.query.limit;
-  const uId = req.params._id;
-  const response = await User.find({
-    _id: uId,
-  });
-  res.json(response);
 });
 
 const listener = app.listen(process.env.PORT || 3000, () => {
