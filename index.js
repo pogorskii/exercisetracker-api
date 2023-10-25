@@ -1,3 +1,4 @@
+// Dependencies
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -5,49 +6,55 @@ const app = express();
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
-mongoose.connect(process.env.MONGO_URI);
-
-const UserSchema = new Schema({
-  username: String,
-});
-const User = mongoose.model("User", UserSchema);
-
-const ExerciseSchema = new Schema({
-  user_id: { type: String, required: true },
-  description: String,
-  duration: Number,
-  date: Date,
-});
-const Exercise = mongoose.model("Exercise", ExerciseSchema);
-
+// Initial setup
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("Connected to MongoDB"))
+  .catch((err) => console.error("Failed to connect to MongoDB:", err));
 app.use(cors());
 app.use(express.static("public"));
 app.use(express.urlencoded({ extended: true }));
+
+// Configuring DB templates
+// Create Schema and Model for Users
+const userSchema = new Schema({
+  username: { type: String, required: true },
+});
+const User = mongoose.model("User", userSchema);
+
+// Create Schema and Model for Exercises
+const exerciseSchema = new Schema({
+  user_id: { type: String, required: true },
+  description: { type: String, required: true },
+  duration: { type: Number, required: true },
+  date: Date,
+});
+const Exercise = mongoose.model("Exercise", exerciseSchema);
+
+// Handling routes
 app.get("/", (req, res) => {
   res.sendFile(__dirname + "/views/index.html");
 });
 
-app.get("/api/users", async (req, res) => {
-  const users = await User.find({}).select("_id username");
-  if (!users) {
-    res.send("No users");
-  } else {
+app
+  .route("/api/users")
+  .get(async (req, res) => {
+    const users = await User.find().select("_id username");
+    if (!users) res.send("No users found.");
     res.json(users);
-  }
-});
+  })
+  .post(async (req, res) => {
+    const userObj = new User({
+      username: req.body.username,
+    });
 
-app.post("/api/users", async (req, res) => {
-  const userObj = new User({
-    username: req.body.username,
+    try {
+      const user = await userObj.save();
+      res.json(user);
+    } catch (err) {
+      console.error(err);
+    }
   });
-
-  try {
-    const user = await userObj.save();
-    res.json(user);
-  } catch (err) {
-    console.log(err);
-  }
-});
 
 app.post("/api/users/:_id/exercises", async (req, res) => {
   const id = req.params._id;
@@ -55,27 +62,25 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
 
   try {
     const user = await User.findById(id);
-    if (!user) {
-      res.send("Could not find user");
-    } else {
-      const exerciseObj = new Exercise({
-        user_id: user._id,
-        description,
-        duration,
-        date: date ? new Date(date) : new Date(),
-      });
-      const exercise = await exerciseObj.save();
-      res.json({
-        _id: user._id,
-        username: user.username,
-        description: exercise.description,
-        duration: exercise.duration,
-        date: new Date(exercise.date).toDateString(),
-      });
-    }
+    if (!user) res.send("Could not find user with this ID.");
+
+    const exerciseObj = new Exercise({
+      user_id: user._id,
+      description,
+      duration,
+      date: date ? new Date(date) : new Date(),
+    });
+    const exercise = await exerciseObj.save();
+    res.json({
+      _id: user._id,
+      username: user.username,
+      description: exercise.description,
+      duration: exercise.duration,
+      date: new Date(exercise.date).toDateString(),
+    });
   } catch (err) {
-    console.log(err);
-    res.send("There was an error saving the exercise");
+    console.error(err);
+    res.send("Could not save the exercise. Please, try again.");
   }
 });
 
