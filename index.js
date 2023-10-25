@@ -31,6 +31,15 @@ const { Schema } = mongoose;
 // Create User Schema
 const userSchema = new Schema({
   username: { type: String, required: true },
+  count: { type: Number, default: 0 },
+  log: [
+    {
+      description: { type: String, required: true },
+      duration: { type: Number, required: true },
+      date: { type: String },
+      origDate: { type: Date },
+    },
+  ],
 });
 
 // Create User Model
@@ -116,6 +125,22 @@ app
   });
 
 app.route("/api/users/:_id/exercises").post(async (req, res) => {
+  const uId = req.body[":_id"];
+  const dateRaw = req.body.date ? new Date(req.body.date) : new Date();
+  const dateString = dateRaw.toDateString();
+  const newExercise = {
+    description: req.body.description,
+    duration: req.body.duration,
+    origDate: dateRaw,
+    date: dateString,
+  };
+
+  console.log(newExercise);
+  User.findByIdAndUpdate(uId, {
+    $push: { log: newExercise },
+    $inc: { count: 1 },
+  });
+
   const exerciseData = {};
   exerciseData.uId = req.body[":_id"];
   exerciseData.description = req.body.description;
